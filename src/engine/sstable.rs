@@ -186,73 +186,73 @@ mod tests {
             Some("persistent_value".to_string())
         );
     }
-}
+    
+    #[test]
+    fn test_create_persistent_sstable() {
+        use std::path::Path;
+        
+        // Create SSTable in current directory (will persist)
+        let sstable_path = Path::new("example_output.sst");
+        
+        // Create test data
+        let mut data = BTreeMap::new();
+        data.insert("persistent_key1".to_string(), "persistent_value1".to_string());
+        data.insert("persistent_key2".to_string(), "persistent_value2".to_string());
+        data.insert("persistent_key3".to_string(), "persistent_value3".to_string());
 
-#[test]
-fn test_create_persistent_sstable() {
-    use std::path::Path;
-    
-    // Create SSTable in current directory (will persist)
-    let sstable_path = Path::new("example_output.sst");
-    
-    // Create test data
-    let mut data = BTreeMap::new();
-    data.insert("persistent_key1".to_string(), "persistent_value1".to_string());
-    data.insert("persistent_key2".to_string(), "persistent_value2".to_string());
-    data.insert("persistent_key3".to_string(), "persistent_value3".to_string());
-
-    // Create SSTable
-    let sstable = SSTable::create(sstable_path, &data).unwrap();
-    
-    println!("Created persistent SSTable: {}", sstable_path.display());
-    println!("File size: {} bytes", std::fs::metadata(sstable_path).unwrap().len());
-    
-    // Verify it works
-    assert_eq!(sstable.get("persistent_key2").unwrap(), Some("persistent_value2".to_string()));
-    
-    // Note: This file will remain in your project directory
-    // You can examine it or delete it manually
-}
-
-#[test]
-fn test_inspect_sstable_contents() {
-    use std::path::Path;
-    
-    // Create a test SSTable
-    let sstable_path = Path::new("inspect_me.sst");
-    
-    let mut data = BTreeMap::new();
-    data.insert("apple".to_string(), "red fruit".to_string());
-    data.insert("banana".to_string(), "yellow fruit".to_string());
-    data.insert("cherry".to_string(), "small red fruit".to_string());
-
-    // Create SSTable
-    let sstable = SSTable::create(sstable_path, &data).unwrap();
-    
-    // Now let's inspect what's inside
-    println!("\n=== SSTable Inspection ===");
-    println!("File: {}", sstable_path.display());
-    println!("File size: {} bytes", std::fs::metadata(sstable_path).unwrap().len());
-    println!("Record count: {}", sstable.len());
-    
-    // Scan all records to see the structure
-    let records = sstable.scan().unwrap();
-    println!("\nContents (sorted order):");
-    for (i, record) in records.iter().enumerate() {
-        println!("  {}: '{}' -> '{}'", i, record.key, record.value);
+        // Create SSTable
+        let sstable = SSTable::create(sstable_path, &data).unwrap();
+        
+        println!("Created persistent SSTable: {}", sstable_path.display());
+        println!("File size: {} bytes", std::fs::metadata(sstable_path).unwrap().len());
+        
+        // Verify it works
+        assert_eq!(sstable.get("persistent_key2").unwrap(), Some("persistent_value2".to_string()));
+        
+        // Note: This file will remain in your project directory
+        // You can examine it or delete it manually
     }
-    
-    // Test individual lookups
-    println!("\nLookup tests:");
-    println!("apple -> {:?}", sstable.get("apple").unwrap());
-    println!("banana -> {:?}", sstable.get("banana").unwrap());
-    println!("nonexistent -> {:?}", sstable.get("nonexistent").unwrap());
-    
-    // Show raw file info
-    println!("\nFile metadata:");
-    let metadata = std::fs::metadata(sstable_path).unwrap();
-    println!("  Modified: {:?}", metadata.modified().unwrap());
-    println!("  Size: {} bytes", metadata.len());
-    
-    println!("\n=== Inspection Complete ===");
+
+    #[test]
+    fn test_inspect_sstable_contents() {
+        use std::path::Path;
+        
+        // Create a test SSTable
+        let sstable_path = Path::new("inspect_me.sst");
+        
+        let mut data = BTreeMap::new();
+        data.insert("apple".to_string(), "red fruit".to_string());
+        data.insert("banana".to_string(), "yellow fruit".to_string());
+        data.insert("cherry".to_string(), "small red fruit".to_string());
+
+        // Create SSTable
+        let sstable = SSTable::create(sstable_path, &data).unwrap();
+        
+        // Now let's inspect what's inside
+        println!("\n=== SSTable Inspection ===");
+        println!("File: {}", sstable_path.display());
+        println!("File size: {} bytes", std::fs::metadata(sstable_path).unwrap().len());
+        println!("Record count: {}", sstable.len());
+        
+        // Scan all records to see the structure
+        let records = sstable.scan().unwrap();
+        println!("\nContents (sorted order):");
+        for (i, record) in records.iter().enumerate() {
+            println!("  {}: '{}' -> '{}'", i, record.key, record.value);
+        }
+        
+        // Test individual lookups
+        println!("\nLookup tests:");
+        println!("apple -> {:?}", sstable.get("apple").unwrap());
+        println!("banana -> {:?}", sstable.get("banana").unwrap());
+        println!("nonexistent -> {:?}", sstable.get("nonexistent").unwrap());
+        
+        // Show raw file info
+        println!("\nFile metadata:");
+        let metadata = std::fs::metadata(sstable_path).unwrap();
+        println!("  Modified: {:?}", metadata.modified().unwrap());
+        println!("  Size: {} bytes", metadata.len());
+        
+        println!("\n=== Inspection Complete ===");
+    }
 }

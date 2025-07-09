@@ -61,6 +61,10 @@ impl MemTable {
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
+
+    pub fn data(&self) -> &BTreeMap<String, String> {
+        &self.data
+    }
 }
 
 #[cfg(test)]

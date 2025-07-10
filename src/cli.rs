@@ -10,10 +10,9 @@ pub struct DatabaseCLI {
 
 impl DatabaseCLI {
     pub fn new() -> DbResult<Self> {
-        let config = LSMConfig {
-            memtable_size_limit: 100, // Smalller limit for CLI demo
-            data_dir: PathBuf::from("cli_data"),
-        };
+        let mut config = LSMConfig::default();
+        config.memtable_size_limit = 100; // Smaller limit for CLI demo
+        config.data_dir = PathBuf::from("cli_data");
 
         let db = LSMTree::with_config(config)?;
         Ok(Self { db })

@@ -15,7 +15,7 @@ impl DatabaseCLI {
             data_dir: PathBuf::from("cli_data"),
         };
 
-        let db = LSM::with_config(config)?;
+        let db = LSMTree::with_config(config)?;
         Ok(Self { db })
     }
 
@@ -36,7 +36,7 @@ impl DatabaseCLI {
                         continue;
                     }
 
-                    match self.handle_commnand(trimmed) {
+                    match self.handle_command(trimmed) {
                         Ok(should_quit) => {
                             if should_quit {
                                 break;
@@ -61,7 +61,7 @@ impl DatabaseCLI {
     }
 
     fn handle_command(&mut self, command: &str) -> DbResult<bool> {
-        let parts: Vect<&str> = command.split_whitespace().collect();
+        let parts: Vec<&str> = command.split_whitespace().collect();
 
         if parts.is_empty() {
             return Ok(false);
@@ -82,7 +82,7 @@ impl DatabaseCLI {
                     println!("Usage: get <key>");
                     return Ok(false);
                 }
-                match self.db.get(parts[1]) {
+                match self.db.get(parts[1])? {
                     Some(value) => println!("{}: {}", parts[1], value),
                     None => println!("Key not found: {}", parts[1]),
                 }

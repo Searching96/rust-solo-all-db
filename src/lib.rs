@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod cli;
 
 use std::collections::BTreeMap;
 

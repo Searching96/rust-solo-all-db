@@ -129,7 +129,7 @@ impl LSMTree {
         // Create SSTable from MemTable data
         // We need to extract the BTreeMap from MemTable
         // For now, we'll create a new BTreeMap from MemTable entries
-        let mut data = BTreeMap::new();
+        let memtable_data = self.memtable.data();
 
         // We need a way to iterate over MemTable entries
         // Let's add this method to MemTable later, for now we'll work around it
@@ -141,7 +141,7 @@ impl LSMTree {
             self.memtable.len(), filepath.display());
         
         // Create new SSTable (we'll fix the data extraction in next step)
-        let sstable = SSTable::create(&filepath, &data)?;
+        let sstable = SSTable::create(&filepath, &memtable_data)?;
 
         // Add to our list of SSTables (newest first)
         self.sstables.insert(0, sstable);
@@ -286,5 +286,34 @@ mod tests {
         // MemTable should have been flushed and now contains only key3
         assert_eq!(stats_after.memtable_entries, 1);  // Only key3
         // Note: SSTable creation will be fixed in the next step
+    }
+
+    #[test]
+    fn test_lsm_flush_and_read_back() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 2,
+            data_dir: temp_dir.path().to_path_buf(),
+        };
+
+        let mut lsm = LSMTree::with_config(config).unwrap();
+
+        // Insert data to trigger flush
+        lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+        lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+        
+        // This should trigger flush
+        lsm.insert("key3".to_string(), "value3".to_string()).unwrap();
+
+        // Verify we can read all data (from both MemTable and SSTable)
+        assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string())); // From SSTable
+        assert_eq!(lsm.get("key2").unwrap(), Some("value2".to_string())); // From SSTable  
+        assert_eq!(lsm.get("key3").unwrap(), Some("value3".to_string())); // From MemTable
+
+        let stats = lsm.stats();
+        println!("Final stats: {}", stats);
+        assert_eq!(stats.memtable_entries, 1);  // key3
+        assert_eq!(stats.sstable_count, 1);     // one SSTable file
+        assert_eq!(stats.total_sstable_entries, 2); // key1, key2
     }
 }

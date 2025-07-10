@@ -2,8 +2,7 @@
 
 use crate::{DbError, DbResult, MemTable};
 use super::SSTable;
-use std::collections::BTreeMap;
-use std::f32::consts::E;
+use super::Compactor;
 use std::path::{Path, PathBuf};
 use std::fs;
 
@@ -150,6 +149,9 @@ impl LSMTree {
         self.memtable = MemTable::new();
         self.next_sstable_id += 1;
 
+        // Check if compaction is needed after flush
+        self.maybe_compact()?;
+
         Ok(())        
     }
 
@@ -208,6 +210,39 @@ impl LSMTree {
             .max()
             .map(|max_id| max_id + 1)
             .unwrap_or(0)
+    }
+
+    // Trigger compaction if needed
+    pub fn maybe_compact(&mut self) -> DbResult<()> {
+        let compactor = Compactor::new(self.config.data_dir.clone());
+
+        if compactor.should_compact(self.sstables.len()) {
+            println!("Compaction triggered: {} SSTables", self.sstables.len());
+            self.compact()?;
+        }
+        
+        Ok(())
+    }
+
+    // Force compaction of SSTables
+    pub fn compact(&mut self) -> DbResult<()> {
+        if self.sstables.len() < 2 {
+            println!("Skipping compaction: only {} SSTables", self.sstables.len());
+            return Ok(());
+        }
+    
+        let compactor = Compactor::new(self.config.data_dir.clone());
+
+        let old_sstables = self.sstables.clone();
+        let compacted_sstable = compactor.compact_sstables(&old_sstables, self.next_sstable_id)?;
+
+        // Replace old SSTables with the new compacted one
+        self.sstables = vec![compacted_sstable];
+        self.next_sstable_id += 1;
+
+        compactor.cleanup_old_sstables(&old_sstables)?;
+        println!("Compaction successful!");
+        Ok(())
     }
 }
 

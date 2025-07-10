@@ -15,7 +15,7 @@ pub struct Record {
     pub value: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SSTable {
     file_path: PathBuf,
     record_count: usize,

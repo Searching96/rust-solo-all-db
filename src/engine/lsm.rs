@@ -1,5 +1,6 @@
 // LSM Tree implementation - coordinates MemTable and SSTables
 
+use crate::Value;
 use crate::{DbError, DbResult, MemTable};
 use super::SSTable;
 use super::Compactor;
@@ -67,18 +68,29 @@ impl LSMTree {
 
     pub fn get(&self, key: &str) -> DbResult<Option<String>> {
         // First check the MemTable (most recent data)
-        match self.memtable.get(key) {
-            Ok(value) => return Ok(Some(value.clone())),
-            Err(DbError::KeyNotFound(_)) => {
+        match self.memtable.data().get(key) {
+            Some(Value::Data(s)) => return Ok(Some(s.clone())),
+            Some(Value::Tombstone) => return Ok(None),
+            None => {
                 // Key not found in MemTable, check SSTables
             }
-            Err(e) => return Err(e),
         }
 
+        // Check SSTables (newest first)
         for sstable in &self.sstables {
-            match sstable.get(key)? {
-                Some(value) => return Ok(Some(value)),
-                None => continue,
+            // Check if this SSTable contains the key by scanning its records
+            let records = sstable.scan()?;
+            for record in records {
+                if record.key == key {
+                    match &record.value {
+                        Value::Data(s) => return Ok(Some(s.clone())),
+                        Value::Tombstone => return Ok(None), // Key is deleted
+                    }
+                }
+                // Early termination since records are sorted
+                if record.key.as_str() > key {
+                    break;
+                }
             }
         }
 
@@ -86,17 +98,14 @@ impl LSMTree {
     }
 
     pub fn delete(&mut self, key: &str) -> DbResult<bool> {
-        // For now, we'll implement a simple delete by removing from MemTable
-        // In a full LSM implementation, we'd use tombstone markers
-        match self.memtable.delete(key) {
-            Ok(_) => Ok(true),
-            Err(DbError::KeyNotFound(_)) => {
-                // Key might be in SSTables, but we can't delete from immutable SSTables
-                // For now, return false. In a full implementation, we'd add a tombstone.
-                Ok(false)
-            }
-            Err(e) => Err(e),
+        // Insert tombstone in MemTable (this handles deletion from both MemTable and SSTables)
+        self.memtable.insert_tombstone(key.to_string())?;
+
+        if self.memtable.len() >= self.config.memtable_size_limit {
+            self.flush_memtable()?;
         }
+
+        Ok(true)
     }
 
     pub fn stats(&self) -> LSMStats {
@@ -350,5 +359,125 @@ mod tests {
         assert_eq!(stats.memtable_entries, 1);  // key3
         assert_eq!(stats.sstable_count, 1);     // one SSTable file
         assert_eq!(stats.total_sstable_entries, 2); // key1, key2
+    }
+
+    #[test]
+    fn test_tombstone_deletes() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 2,
+            data_dir: temp_dir.path().to_path_buf(),
+        };
+
+        let mut lsm = LSMTree::with_config(config).unwrap();
+
+        // Insert and flush to SSTable
+        lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+        lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+        // This triggers flush to SSTable
+        lsm.insert("key3".to_string(), "value3".to_string()).unwrap();
+
+        // Verify key1 is in SSTable
+        assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string()));
+
+        // Delete key1 (should insert tombstone)
+        assert!(lsm.delete("key1").unwrap());
+
+        // key1 should now be "deleted" (not found)
+        assert_eq!(lsm.get("key1").unwrap(), None);
+
+        println!("=== Before compaction ===");
+        println!("Stats: {}", lsm.stats());
+        for (i, sstable) in lsm.sstables.iter().enumerate() {
+            println!("SSTable {}: {} entries", i, sstable.len());
+            let records = sstable.scan().unwrap();
+            for record in records {
+                println!("  {} -> {:?}", record.key, record.value);
+            }
+        }
+
+        // Force compaction
+        lsm.compact().unwrap();
+
+        println!("=== After compaction ===");
+        println!("Stats: {}", lsm.stats());
+        for (i, sstable) in lsm.sstables.iter().enumerate() {
+            println!("SSTable {}: {} entries", i, sstable.len());
+            let records = sstable.scan().unwrap();
+            for record in records {
+                println!("  {} -> {:?}", record.key, record.value);
+            }
+        }
+
+        // After compaction, key1 should still be deleted
+        println!("=== Testing key1 after compaction ===");
+        let result = lsm.get("key1").unwrap();
+        println!("key1 result: {:?}", result);
+        assert_eq!(result, None);
+        
+        // But key2 should still exist
+        assert_eq!(lsm.get("key2").unwrap(), Some("value2".to_string()));
+    }
+
+    #[test]
+    fn test_tombstone_deletes_debug() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 2,
+            data_dir: temp_dir.path().to_path_buf(),
+        };
+
+        let mut lsm = LSMTree::with_config(config).unwrap();
+
+        // Insert and flush to SSTable
+        println!("=== Inserting key1, key2 ===");
+        lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+        lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+        
+        println!("=== Before third insert (should trigger flush) ===");
+        println!("Stats: {}", lsm.stats());
+        
+        // This triggers flush to SSTable
+        lsm.insert("key3".to_string(), "value3".to_string()).unwrap();
+        
+        println!("=== After flush ===");
+        println!("Stats: {}", lsm.stats());
+
+        // Verify key1 is in SSTable
+        println!("=== Checking key1 before delete ===");
+        let value = lsm.get("key1").unwrap();
+        println!("key1 value: {:?}", value);
+        assert_eq!(value, Some("value1".to_string()));
+
+        // Delete key1 (should insert tombstone)
+        println!("=== Deleting key1 ===");
+        assert!(lsm.delete("key1").unwrap());
+        
+        println!("=== After delete, before get ===");
+        println!("Stats: {}", lsm.stats());
+        
+        // Check what's in MemTable
+        println!("MemTable contents after delete:");
+        for (k, v) in lsm.memtable.data() {
+            println!("  {} -> {:?}", k, v);
+        }
+
+        // Check what's in each SSTable
+        println!("=== Checking SSTables ===");
+        for (i, sstable) in lsm.sstables.iter().enumerate() {
+            println!("SSTable {}: {} entries", i, sstable.len());
+            let records = sstable.scan().unwrap();
+            for record in records {
+                println!("  {} -> {:?}", record.key, record.value);
+            }
+        }
+
+        // key1 should now be "deleted" (not found)
+        println!("=== Getting key1 after delete ===");
+        let value_after_delete = lsm.get("key1").unwrap();
+        println!("key1 after delete: {:?}", value_after_delete);
+        
+        // This should be None!
+        assert_eq!(value_after_delete, None);
     }
 }

@@ -2,17 +2,37 @@ pub mod engine;
 pub mod cli;
 
 use std::collections::BTreeMap;
+use serde::{Serialize, Deserialize};
 
 // A simple in-memory key-value store using a BTreeMa
 #[derive(Debug, Default)]
 pub struct MemTable {
-    data: BTreeMap<String, String>,
+    data: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum DbError {
     KeyNotFound(String),
     InvalidOperation(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Value {
+    Data(String),
+    Tombstone,
+}
+
+impl Value {
+    pub fn is_tombstone(&self) -> bool {
+        matches!(self, Value::Tombstone)
+    }
+
+    pub fn as_data(&self) -> Option<&String> {
+        match self {
+            Value::Data(s) => Some(s),
+            Value::Tombstone => None,
+        }
+    }
 }
 
 impl std::fmt::Display for DbError {
@@ -39,20 +59,37 @@ impl MemTable {
     }
 
     pub fn insert(&mut self, key: String, value: String) -> DbResult<()> {
-        self.data.insert(key, value);
+        self.data.insert(key, Value::Data(value));
+        Ok(())
+    }
+
+    pub fn insert_tombstone(&mut self, key: String) -> DbResult<()> {
+        self.data.insert(key, Value::Tombstone);
         Ok(())
     }
 
     pub fn get(&self, key: &str) -> DbResult<&String> {
-        self.data
-            .get(key)
-            .ok_or_else(|| DbError::KeyNotFound(key.to_string()))
+        match self.data.get(key) {
+            Some(Value::Data(s)) => Ok(s),
+            Some(Value::Tombstone) => Err(DbError::KeyNotFound(key.to_string())),
+            None => Err(DbError::KeyNotFound(key.to_string())),
+        }
     }
 
     pub fn delete(&mut self, key: &str) -> DbResult<String> {
-        self.data
-            .remove(key)
-            .ok_or_else(|| DbError::KeyNotFound(key.to_string()))
+        match self.data.get(key) {
+            Some(Value::Data(s)) => {
+                let value = s.clone();
+                self.data.insert(key.to_string(), Value::Tombstone);
+                Ok(value)
+            }
+            Some(Value::Tombstone) => Err(DbError::KeyNotFound(key.to_string())),
+            None => {
+                // Key not in MemTable, insert tombstone anyway (might be in SSTable)
+                self.data.insert(key.to_string(), Value::Tombstone);
+                Ok("".to_string()) // We dont know the original value
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -63,7 +100,7 @@ impl MemTable {
         self.data.is_empty()
     }
 
-    pub fn data(&self) -> &BTreeMap<String, String> {
+    pub fn data(&self) -> &BTreeMap<String, Value> {
         &self.data
     }
 }

@@ -22,6 +22,21 @@ pub enum Value {
     Tombstone,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WALEntry {
+    Insert { key: String, value: String },
+    Delete { key: String },
+}
+
+impl WALEntry {
+    pub fn key(&self) -> &str {
+        match self {
+            WALEntry::Insert {key, ..} => key,
+            WALEntry::Delete {key} => key,
+        }
+    }
+}
+
 impl Value {
     pub fn is_tombstone(&self) -> bool {
         matches!(self, Value::Tombstone)

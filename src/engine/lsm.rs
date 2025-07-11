@@ -1,9 +1,10 @@
 // LSM Tree implementation - coordinates MemTable and SSTables
 
-use crate::Value;
+use crate::{Value, WALEntry};
 use crate::{DbError, DbResult, MemTable};
 use super::SSTable;
 use super::Compactor;
+use super::WAL;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub struct LSMConfig {
     pub data_dir: PathBuf,
     pub background_compaction: bool,
     pub background_compaction_interval: Duration,
+    pub enable_wal: bool,
 }
 
 impl Default for LSMConfig {
@@ -30,6 +32,7 @@ impl Default for LSMConfig {
             data_dir: PathBuf::from("data"),
             background_compaction: true, // Enable background compaction by default
             background_compaction_interval: Duration::from_secs(10),
+            enable_wal: true,
         }
     }
 }
@@ -67,6 +70,7 @@ pub struct LSMTree {
     config: LSMConfig,
     next_sstable_id: Arc<AtomicU64>, // A thread-safe counter for generating unique SSTable filenames
     compaction_handle: Option<CompactionHandle>,
+    wal: Option<Arc<RwLock<WAL>>>,
 }
 
 impl LSMTree {
@@ -82,12 +86,36 @@ impl LSMTree {
             DbError::InvalidOperation(format!("Failed to create data directory: {}", e))
         })?;
 
+        // Initialize WAL if enabled
+        let wal = if config.enable_wal {
+            let wal_path = config.data_dir.join("wal.log");
+            let wal_instance = WAL::new(wal_path)?;
+            Some(Arc::new(RwLock::new(wal_instance)))
+        } else {
+            None
+        };
+
         let sstables = Self::load_existing_sstables(&config.data_dir)?;
         let next_sstable_id = Self::determine_next_id(&sstables);
 
         let memtable = Arc::new(RwLock::new(MemTable::new()));
         let sstables = Arc::new(RwLock::new(sstables));
         let next_sstable_id = Arc::new(AtomicU64::new(next_sstable_id));
+
+        // Replay WAL if it exists
+        let mut lsm = Self {
+            memtable: memtable.clone(),
+            sstables: sstables.clone(),
+            config: config.clone(),
+            next_sstable_id: next_sstable_id.clone(),
+            compaction_handle: None,
+            wal,
+        };
+
+        // Replay WAL entries to recover state
+        if lsm.wal.is_some() {
+            lsm.replay_wal()?;
+        }
 
         // Start background compaction thread if enabled
         let compaction_handle = if config.background_compaction {
@@ -100,13 +128,35 @@ impl LSMTree {
             None
         };
 
-        Ok(Self {
-            memtable,
-            sstables,
-            config,
-            next_sstable_id,
-            compaction_handle,
-        })
+        lsm.compaction_handle = compaction_handle;
+
+        Ok(lsm)
+    }
+
+    fn replay_wal(&mut self) -> DbResult<()> {
+        if let Some(ref wal) = self.wal {
+            let entries = {
+                let wal_guard = wal.read();
+                wal_guard.read_all()?
+            };
+
+            println!("Replaying {} WAL entries...", entries.len());
+
+            for entry in entries {
+                match entry {
+                    WALEntry::Insert { key, value } => {
+                        let mut memtable = self.memtable.write();
+                        memtable.insert(key, value)?;
+                    }
+                    WALEntry::Delete { key } => {
+                        let mut memtable = self.memtable.write();
+                        memtable.insert_tombstone(key)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn start_background_compaction(
@@ -203,6 +253,17 @@ impl LSMTree {
     }
 
     pub fn insert(&mut self, key: String, value: String) -> DbResult<()> {
+        // Write to WAL first (if enabled)
+        if let Some(ref wal) = self.wal {
+            let entry = WALEntry::Insert {
+                key: key.clone(),
+                value: value.clone(),
+            };
+            let mut wal_guard = wal.write();
+            wal_guard.append(&entry)?;
+        }
+
+        // Then write to MemTable 
         {
             let mut memtable = self.memtable.write();
             memtable.insert(key, value)?;
@@ -257,6 +318,15 @@ impl LSMTree {
     }
 
     pub fn delete(&mut self, key: &str) -> DbResult<bool> {
+        // Write to WAL first (if enabled)
+        if let Some(ref wal) = self.wal {
+            let entry = WALEntry::Delete {
+                key: key.to_string(),
+            };
+            let mut wal_guard = wal.write();
+            wal_guard.append(&entry)?;
+        }
+
         // Insert tombstone in MemTable (this handles deletion from both MemTable and SSTables)
         {
             let mut memtable = self.memtable.write();
@@ -339,6 +409,13 @@ impl LSMTree {
         {
             let mut memtable = self.memtable.write();
             *memtable = MemTable::new();
+        }
+
+        // Truncate WAL since data is now persisted in SSTable
+        if let Some(ref wal) = self.wal {
+            let mut wal_guard = wal.write();
+            wal_guard.truncate()?;
+            println!("WAL truncated after flush");
         }
 
         // Handle compaction based on configuration
@@ -499,6 +576,7 @@ mod tests {
             data_dir: temp_dir.path().to_path_buf(),
             background_compaction: true,
             background_compaction_interval: Duration::from_millis(100), // Fast for testing
+            enable_wal: true,
         };
 
         let mut lsm = LSMTree::with_config(config).unwrap();
@@ -561,6 +639,7 @@ mod tests {
             data_dir: temp_dir.path().to_path_buf(),
             background_compaction: false,  // Disabled
             background_compaction_interval: Duration::from_secs(1),
+            enable_wal: true,
         };
 
         let mut lsm = LSMTree::with_config(config).unwrap();

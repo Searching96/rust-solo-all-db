@@ -1,6 +1,7 @@
 // SSTable (Sorted String Table) implementation
 // An immutable, sorted file format for storing key-value pairs
 
+use crate::engine::BloomFilter;
 use crate::{DbError, DbResult, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -19,6 +20,7 @@ pub struct Record {
 pub struct SSTable {
     file_path: PathBuf,
     record_count: usize,
+    bloom_filter: BloomFilter,
 }
 
 impl SSTable {
@@ -54,9 +56,16 @@ impl SSTable {
             DbError::InvalidOperation(format!("Failed to serialize SSTable: {}", e))
         })?;
 
+        // Build bloom filter for all keys
+        let mut bloom_filter = BloomFilter::new(data.len(), 0.01); // 1% false positive rate
+        for key in data.keys() {
+            bloom_filter.insert(key);
+        }
+
         Ok(SSTable {
             file_path: path,
             record_count: records.len(),
+            bloom_filter,
         })    
     }
 
@@ -75,13 +84,26 @@ impl SSTable {
         // In real implementation, we would store metadata separately
         let records = Self::load_records(&path)?;
 
+        // Build bloom filter by reading all keys from the loaded records
+        let mut bloom_filter = BloomFilter::new(records.len(), 0.01);
+        for record in &records {
+            bloom_filter.insert(&record.key);
+        }
+
         Ok(SSTable {
             file_path: path,
             record_count: records.len(),
+            bloom_filter,
         })
     }
 
     pub fn get(&self, key: &str) -> DbResult<Option<String>> {
+        // Check bloom filter first - fast negative lookup
+        if !self.bloom_filter.contains(key) {
+            return Ok(None); // Definitely not in this SSTable
+        }
+
+        // If bloom filter passed, we can do a full scan
         let records = Self::load_records(&self.file_path)?;
 
         for record in records {
@@ -99,6 +121,14 @@ impl SSTable {
         }
 
         Ok(None)
+    }
+
+    pub fn might_contain(&self, key: &str) -> bool {
+        self.bloom_filter.contains(key)
+    }
+
+    pub fn bloom_filter_stats(&self) -> (usize, f64) {
+        (self.bloom_filter.len(), self.bloom_filter.estimated_false_positive_rate())
     }
 
     // Get all records from the SSTable (for debugging or testing)

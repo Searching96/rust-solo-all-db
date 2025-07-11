@@ -732,7 +732,6 @@ mod tests {
     //     println!("Final stats: {}", stats);
     //     assert_eq!(stats.memtable_entries, 1);  // key3
     //     assert_eq!(stats.sstable_count, 1);     // one SSTable file
-    //     assert_eq!(stats.total_sstable_entries, 2); // key1, key2
     // }
 
     // #[test]
@@ -854,4 +853,149 @@ mod tests {
     //     // This should be None!
     //     assert_eq!(value_after_delete, None);
     // }
+
+    #[test]
+    fn test_wal_recovery() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 10,  // Large limit to prevent auto-flush
+            data_dir: temp_dir.path().to_path_buf(),
+            background_compaction: false,  // Disable compaction for this test
+            background_compaction_interval: Duration::from_secs(1),
+            enable_wal: true,  // Enable WAL
+        };
+
+        // Phase 1: Insert data with WAL enabled
+        {
+            let mut lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            println!("=== Phase 1: Inserting data with WAL enabled ===");
+            lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+            lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+            lsm.insert("key3".to_string(), "value3".to_string()).unwrap();
+            
+            // Delete one key to test tombstone recovery
+            lsm.delete("key2").unwrap();
+            
+            let stats = lsm.stats();
+            println!("Before 'crash': {}", stats);
+            
+            // Verify data is accessible
+            assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string()));
+            assert_eq!(lsm.get("key2").unwrap(), None); // Deleted
+            assert_eq!(lsm.get("key3").unwrap(), Some("value3".to_string()));
+            
+            // Don't flush - simulate a crash where data is only in MemTable and WAL
+            // LSMTree goes out of scope here, simulating a crash
+        }
+        
+        // Phase 2: Recover from WAL
+        {
+            println!("=== Phase 2: Recovering from WAL after 'crash' ===");
+            let lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            let stats_after_recovery = lsm.stats();
+            println!("After WAL recovery: {}", stats_after_recovery);
+            
+            // Data should be recovered from WAL
+            assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string()), "key1 should be recovered from WAL");
+            assert_eq!(lsm.get("key2").unwrap(), None, "key2 should remain deleted after recovery");
+            assert_eq!(lsm.get("key3").unwrap(), Some("value3".to_string()), "key3 should be recovered from WAL");
+            
+            // MemTable should contain the recovered data
+            assert_eq!(stats_after_recovery.memtable_entries, 3); // key1, key2 (tombstone), key3
+            assert_eq!(stats_after_recovery.sstable_count, 0); // No SSTables since we didn't flush
+        }
+        
+        println!("WAL recovery test completed successfully!");
+    }
+
+    #[test]
+    fn test_wal_disabled() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 10,
+            data_dir: temp_dir.path().to_path_buf(),
+            background_compaction: false,
+            background_compaction_interval: Duration::from_secs(1),
+            enable_wal: false,  // Disable WAL
+        };
+
+        // Phase 1: Insert data without WAL
+        {
+            let mut lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            println!("=== Testing WAL disabled ===");
+            lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+            lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+            
+            // Verify data is accessible
+            assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string()));
+            assert_eq!(lsm.get("key2").unwrap(), Some("value2".to_string()));
+        }
+        
+        // Phase 2: After restart, data should be lost (no WAL)
+        {
+            let lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            // Data should be lost since WAL was disabled and we didn't flush
+            assert_eq!(lsm.get("key1").unwrap(), None, "key1 should be lost without WAL");
+            assert_eq!(lsm.get("key2").unwrap(), None, "key2 should be lost without WAL");
+            
+            let stats = lsm.stats();
+            assert_eq!(stats.memtable_entries, 0);
+            assert_eq!(stats.sstable_count, 0);
+        }
+        
+        println!("WAL disabled test completed successfully!");
+    }
+
+    #[test]
+    fn test_wal_with_flush() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 2,  // Small limit to trigger flush
+            data_dir: temp_dir.path().to_path_buf(),
+            background_compaction: false,
+            background_compaction_interval: Duration::from_secs(1),
+            enable_wal: true,
+        };
+
+        // Test that WAL works correctly with manual flush
+        {
+            let mut lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            println!("=== Testing WAL with manual flush ===");
+            
+            // Insert data but don't trigger auto-flush
+            lsm.insert("key1".to_string(), "value1".to_string()).unwrap();
+            lsm.insert("key2".to_string(), "value2".to_string()).unwrap();
+            
+            // Manually flush
+            lsm.flush().unwrap();
+            
+            let stats = lsm.stats();
+            println!("After manual flush: {}", stats);
+            
+            // Should have data in SSTable
+            assert!(stats.sstable_count >= 1);
+            assert_eq!(stats.memtable_entries, 0); // MemTable should be empty after flush
+        }
+        
+        // Phase 2: After restart, data should be recovered from SSTables
+        {
+            let lsm = LSMTree::with_config(config.clone()).unwrap();
+            
+            // Data should be recovered from SSTables since WAL was truncated after flush
+            assert_eq!(lsm.get("key1").unwrap(), Some("value1".to_string()));
+            assert_eq!(lsm.get("key2").unwrap(), Some("value2".to_string()));
+            
+            let stats = lsm.stats();
+            println!("After restart: {}", stats);
+            assert!(stats.sstable_count >= 1);
+            assert_eq!(stats.memtable_entries, 0); // No WAL entries to replay
+        }
+        
+        println!("WAL with flush test completed successfully!");
+    }
 }

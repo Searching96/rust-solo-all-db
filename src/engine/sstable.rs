@@ -21,6 +21,9 @@ pub struct SSTable {
     file_path: PathBuf,
     record_count: usize,
     bloom_filter: BloomFilter,
+    level: usize,
+    min_key: String,
+    max_key: String,
 }
 
 impl SSTable {
@@ -62,10 +65,17 @@ impl SSTable {
             bloom_filter.insert(key);
         }
 
+        // Calculate min and max keys
+        let min_key = data.keys().next().unwrap_or(&String::new()).clone();
+        let max_key = data.keys().last().unwrap_or(&String::new()).clone();
+
         Ok(SSTable {
             file_path: path,
             record_count: records.len(),
             bloom_filter,
+            level: 0, // Default to level 0
+            min_key,
+            max_key,
         })    
     }
 
@@ -90,10 +100,17 @@ impl SSTable {
             bloom_filter.insert(&record.key);
         }
 
+        // Calculate min and max keys from records
+        let min_key = records.first().map(|r| r.key.clone()).unwrap_or_default();
+        let max_key = records.last().map(|r| r.key.clone()).unwrap_or_default();
+
         Ok(SSTable {
             file_path: path,
             record_count: records.len(),
             bloom_filter,
+            level: 0, // Default to level 0
+            min_key,
+            max_key,
         })
     }
 
@@ -159,6 +176,70 @@ impl SSTable {
 
         bincode::deserialize_from(reader).map_err(|e| {
             DbError::InvalidOperation(format!("Failed to deserialize SSTable: {}", e))
+        })
+    }
+
+    pub fn level(&self) -> usize {
+        self.level
+    }
+
+    pub fn min_key(&self) -> &str {
+        &self.min_key
+    }
+
+    pub fn max_key(&self) -> &str {
+        &self.max_key
+    }
+
+    pub fn create_with_level<P: AsRef<Path>>(
+        file_path: P,
+        data: &BTreeMap<String, Value>,
+        level: usize,
+    ) -> DbResult<Self> {
+        let path = file_path.as_ref().to_path_buf();
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                DbError::InvalidOperation(format!("Failed to create directory: {}", e))
+            })?;
+        }
+
+        let file = File::create(&path).map_err(|e| {
+            DbError::InvalidOperation(format!("Failed to create SSTable file: {}", e))
+        })?;
+
+        let mut writer = BufWriter::new(file);
+
+        // Convert BTreeMap to sorted records
+        let records: Vec<Record> = data
+            .iter()
+            .map(|(k, v)| Record {
+                key: k.clone(),
+                value: v.clone(),
+            })
+            .collect();
+
+        bincode::serialize_into(&mut writer, &records).map_err(|e| {
+            DbError::InvalidOperation(format!("Failed to serialize SSTable: {}", e))
+        })?;
+
+        // Build bloom filter for all keys
+        let mut bloom_filter = BloomFilter::new(data.len(), 0.01);
+        for key in data.keys() {
+            bloom_filter.insert(key);
+        }
+
+        // Calculate min/max keys
+        let min_key = data.keys().next().unwrap_or(&String::new()).clone();
+        let max_key = data.keys().last().unwrap_or(&String::new()).clone();
+
+        Ok(SSTable {
+            file_path: path,
+            record_count: records.len(),
+            bloom_filter,
+            level,
+            min_key,
+            max_key,
         })
     }
 }

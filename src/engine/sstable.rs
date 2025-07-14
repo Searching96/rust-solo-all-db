@@ -31,6 +31,7 @@ impl SSTable {
     pub fn create<P:AsRef<Path>>(
         file_path: P,
         data: &BTreeMap<String, Value>,
+        level: usize,
     ) -> DbResult<Self> {
         let path = file_path.as_ref().to_path_buf();
 
@@ -73,7 +74,7 @@ impl SSTable {
             file_path: path,
             record_count: records.len(),
             bloom_filter,
-            level: 0, // Default to level 0
+            level, 
             min_key,
             max_key,
         })    
@@ -92,7 +93,7 @@ impl SSTable {
 
         // Read the file to count records
         // In real implementation, we would store metadata separately
-        let records = Self::load_records(&path)?;
+        let records = Self::load_records_from_path(&path)?;
 
         // Build bloom filter by reading all keys from the loaded records
         let mut bloom_filter = BloomFilter::new(records.len(), 0.01);
@@ -121,7 +122,7 @@ impl SSTable {
         }
 
         // If bloom filter passed, we can do a full scan
-        let records = Self::load_records(&self.file_path)?;
+        let records = Self::load_records_from_path(&self.file_path)?;
 
         for record in records {
             if record.key == key { // Since PartialEq is derived, we can use == directly
@@ -150,7 +151,7 @@ impl SSTable {
 
     // Get all records from the SSTable (for debugging or testing)
     pub fn scan(&self) -> DbResult<Vec<Record>> {
-        Self::load_records(&self.file_path)
+        Self::load_records_from_path(&self.file_path)
     }
 
     pub fn len(&self) -> usize {
@@ -167,7 +168,12 @@ impl SSTable {
     }
 
     // Help method to load records from disk
-    fn load_records(file_path: &Path) -> DbResult<Vec<Record>> {
+    pub fn load_records(&self) -> DbResult<Vec<Record>> {
+        Self::load_records_from_path(&self.file_path)
+    }
+
+    // Static helper method to load records from disk
+    fn load_records_from_path(file_path: &Path) -> DbResult<Vec<Record>> {
         let file = File::open(file_path).map_err(|e| {
             DbError::InvalidOperation(format!("Failed to open SSTable file: {}", e))
         })?;
@@ -178,6 +184,7 @@ impl SSTable {
             DbError::InvalidOperation(format!("Failed to deserialize SSTable: {}", e))
         })
     }
+
 
     pub fn level(&self) -> usize {
         self.level
@@ -277,7 +284,7 @@ mod tests {
 //         let records = sstable.scan().unwrap();
 //         assert_eq!(records.len(), 3);
 //         as
-// sert_eq!(records[0].key, "key1");
+// assert_eq!(records[0].key, "key1");
 //         assert_eq!(records[1].key, "key2");
 //         assert_eq!(records[2].key, "key3");
 //     }

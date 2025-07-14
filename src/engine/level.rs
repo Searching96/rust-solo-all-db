@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct LevelManager {
-    levels: BTreeMap<usize, Vec<SSTable>>, // lvel -> SSTables
+    levels: BTreeMap<usize, Vec<SSTable>>, // level -> SSTables
     max_level: usize,
     level_size_multiplier: usize, // Usually 10
     level_0_file_limit: usize, // Trigger compaction
@@ -89,7 +89,7 @@ impl LevelManager {
                 let max_size = self.get_max_level_size(level);
                 let current_size = self.get_level_size(level);
 
-                if current_size >= max_size {
+                if current_size < max_size {
                     return Vec::new();
                 }
 
@@ -114,19 +114,19 @@ impl LevelManager {
         overlapping
     }
 
-    pub fn remove_sstable(&mut self, sstable_to_remove: &[SSTable]) {
-        for sstable in sstable_to_remove {
+    pub fn remove_sstables(&mut self, sstables_to_remove: &[SSTable]) {
+        for sstable in sstables_to_remove {
             let level = sstable.level();
             if let Some(level_sstables) = self.levels.get_mut(&level) {
                 level_sstables.retain(|s| s.file_path() != sstable.file_path());
-
+                
                 // Clean up empty levels
                 if level_sstables.is_empty() {
                     self.levels.remove(&level);
                 }
             }
         }
-
+        
         // Update max_level
         self.max_level = self.levels.keys().max().copied().unwrap_or(0);
     }

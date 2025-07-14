@@ -108,18 +108,6 @@ impl DatabaseCLI {
                 self.db.flush()?;
                 println!("Database flushed to disk");
             }
-
-            "compact" => {
-                self.db.compact()?;
-                let stats = self.db.stats();
-                println!("After compaction: {}", stats);
-            }
-
-            "autocompact" => {
-                self.db.maybe_compact()?;
-                let stats = self.db.stats();
-                println!("After auto-compaction: {}", stats);
-            }
             
             "help" => {
                 self.print_help();
@@ -143,8 +131,6 @@ impl DatabaseCLI {
         println!("  get <key>            - Get value by key");
         println!("  delete <key>         - Delete a key");
         println!("  load <csv_file>      - Load data from CSV file (key,value format)");
-        println!("  compact              - Force compaction of SSTables");
-        println!("  autocompact          - Check and compact if needed");
         println!("  stats                - Show database statistics");
         println!("  flush                - Force flush to disk");
         println!("  help                 - Show this help");

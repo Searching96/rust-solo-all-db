@@ -3,8 +3,8 @@
 use crate::{Value, WALEntry};
 use crate::{DbError, DbResult, MemTable};
 use super::SSTable;
-use super::Compactor;
 use super::WAL;
+use super::{LevelManager, LeveledCompactor};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::sync::Arc;
@@ -12,9 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use parking_lot::RwLock;
-use crossbeam_channel::{Receiver, Sender, unbounded};
-
-
+use crossbeam_channel::{Sender, unbounded};
 
 #[derive(Debug, Clone)]
 pub struct LSMConfig {
@@ -46,7 +44,7 @@ pub enum CompactionMessage {
 #[derive(Debug)]
 pub struct CompactionHandle {
     sender: Sender<CompactionMessage>,
-    thread_handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl CompactionHandle {
@@ -56,7 +54,7 @@ impl CompactionHandle {
 
     pub fn shutdown(mut self) {
         let _ = self.sender.send(CompactionMessage::ShutDown);
-        if let Some(handle) = self.thread_handle.take() {
+        if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
     }
@@ -66,11 +64,12 @@ impl CompactionHandle {
 #[derive(Debug)]
 pub struct LSMTree {
     memtable: Arc<RwLock<MemTable>>,
-    sstables: Arc<RwLock<Vec<SSTable>>>,
+    level_manager: Arc<RwLock<LevelManager>>,
     config: LSMConfig,
     next_sstable_id: Arc<AtomicU64>, // A thread-safe counter for generating unique SSTable filenames
     compaction_handle: Option<CompactionHandle>,
     wal: Option<Arc<RwLock<WAL>>>,
+    leveled_compactor: Arc<RwLock<LeveledCompactor>>,
 }
 
 impl LSMTree {
@@ -95,24 +94,36 @@ impl LSMTree {
             None
         };
 
-        let sstables = Self::load_existing_sstables(&config.data_dir)?;
-        let next_sstable_id = Self::determine_next_id(&sstables);
+        // Load existing SSTables and organize them by level
+        let existing_sstables = Self::load_existing_sstables(&config.data_dir)?;
+        let next_sstable_id = Self::determine_next_id(&existing_sstables);
+
+        let mut level_manager = LevelManager::new();
+        for sstable in existing_sstables {
+            let level = sstable.level();
+            level_manager.add_sstable(sstable, level);
+        }
 
         let memtable = Arc::new(RwLock::new(MemTable::new()));
-        let sstables = Arc::new(RwLock::new(sstables));
+        let level_manager = Arc::new(RwLock::new(level_manager));
         let next_sstable_id = Arc::new(AtomicU64::new(next_sstable_id));
+        let leveled_compactor = Arc::new(RwLock::new(LeveledCompactor::new(
+            config.data_dir.clone(),
+            next_sstable_id.load(Ordering::SeqCst),
+        )));
 
-        // Replay WAL if it exists
+        // Create the LSMTree instance
         let mut lsm = Self {
             memtable: memtable.clone(),
-            sstables: sstables.clone(),
+            level_manager: level_manager.clone(),
             config: config.clone(),
             next_sstable_id: next_sstable_id.clone(),
             compaction_handle: None,
             wal,
+            leveled_compactor: leveled_compactor.clone(),
         };
 
-        // Replay WAL entries to recover state
+        // Replay WAL to restore state
         if lsm.wal.is_some() {
             lsm.replay_wal()?;
         }
@@ -120,9 +131,9 @@ impl LSMTree {
         // Start background compaction thread if enabled
         let compaction_handle = if config.background_compaction {
             Some(Self::start_background_compaction(
-                sstables.clone(),
+                level_manager.clone(),
+                leveled_compactor.clone(),
                 config.clone(),
-                next_sstable_id.clone(),
             )?)
         } else {
             None
@@ -160,96 +171,40 @@ impl LSMTree {
     }
 
     fn start_background_compaction(
-        sstables: Arc<RwLock<Vec<SSTable>>>,
+        level_manager: Arc<RwLock<LevelManager>>,
+        leveled_compactor: Arc<RwLock<LeveledCompactor>>,
         config: LSMConfig,
-        next_sstable_id: Arc<AtomicU64>,
     ) -> DbResult<CompactionHandle> {
-        let (sender, receiver) = unbounded();
+        let (tx, rx) = unbounded();
+        let handle = thread::spawn(move || {
+            loop {
+                match rx.recv_timeout(config.background_compaction_interval) {
+                    Ok(CompactionMessage::CheckCompaction) | Err(_) => {
+                        // Check if any level needs compaction
+                        let mut level_manager = level_manager.write();
+                        let mut leveled_compactor = leveled_compactor.write();
 
-
-        let thread_handle = thread::spawn(move || {
-            Self::background_compaction_loop(sstables, config, next_sstable_id, receiver);
+                        // Check levels in priority order (L0 first, then L1, etc.)
+                        for level in 0..=level_manager.get_max_level() {
+                            if level_manager.should_compact(level) {
+                                println!("Triggering compaction for level {}", level);
+                                if let Err(e) = leveled_compactor.compact_level(
+                                    &mut level_manager, level) {
+                                    eprintln!("Compaction failed for level {}: {}", level, e);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    Ok(CompactionMessage::ShutDown) => break,
+                }
+            }
         });
 
         Ok(CompactionHandle {
-            sender,
-            thread_handle: Some(thread_handle),
+            sender: tx,
+            handle: Some(handle),
         })
-    }
-
-    fn background_compaction_loop(
-        sstables: Arc<RwLock<Vec<SSTable>>>,
-        config: LSMConfig,
-        next_sstable_id: Arc<AtomicU64>,
-        receiver: Receiver<CompactionMessage>,
-    ) {
-        loop {
-            // Wait for a message or timeout
-            match receiver.recv_timeout(config.background_compaction_interval) {
-                Ok(CompactionMessage::CheckCompaction) => {
-                    // Explicit compaction request
-                    Self::try_background_compaction(&sstables, &config, &next_sstable_id);
-                }
-                Ok(CompactionMessage::ShutDown) => {
-                    println!("Background compaction thread shutting down...");
-                    break;
-                }
-                Err(_) => {
-                    // Timeout occurred, check if compaction is needed
-                    Self::try_background_compaction(&sstables, &config, &next_sstable_id);
-                }
-            }
-        }
-    }
-
-    fn try_background_compaction(
-        sstables: &Arc<RwLock<Vec<SSTable>>>,
-        config: &LSMConfig,
-        next_sstable_id: &Arc<AtomicU64>,
-    ) {
-        let compactor = Compactor::new(config.data_dir.clone());
-
-        // Check if compaction is needed
-        let should_compact = {
-            let sstables_guard = sstables.read();
-            compactor.should_compact(sstables_guard.len())
-        };
-
-        if should_compact {
-            print!("Background compaction starting...");
-
-            let result = {
-                let mut sstables_guard = sstables.write();
-                if sstables_guard.len() < 2 {
-                    println!("Skipping compaction: only {} SSTables", sstables_guard.len());
-                    return;
-                }
-
-                let old_sstables = sstables_guard.clone();
-                let current_id = next_sstable_id.fetch_add(1, Ordering::SeqCst);
-
-                match compactor.compact_sstables(&old_sstables, current_id) {
-                    Ok(compacted_sstable) => {
-                        // Replace old SSTables with the new compacted one
-                        *sstables_guard = vec![compacted_sstable];
-                        Ok(old_sstables)
-                    }
-                    Err(e) => {
-                        println!("Background compaction failed: {}", e);
-                        Err(e)
-                    }
-                }
-            };
-
-            // Clean up old files if compaction was successful
-            if let Ok(old_sstables) = result {
-                if let Err(e) = compactor.cleanup_old_sstables(&old_sstables) {
-                    println!("failed to cleanup old SSTables: {}", e);
-                } else {
-                    println!("Background compaction completed successfully!");
-                }
-            }
-        }
     }
 
     pub fn insert(&mut self, key: String, value: String) -> DbResult<()> {
@@ -295,22 +250,19 @@ impl LSMTree {
             }
         }
 
-        // Check SSTables (newest first)
-        let sstables = self.sstables.read();
-        for sstable in sstables.iter() {
-            // Check if this SSTable contains the key by scanning its records
-            let records = sstable.scan()?;
-            for record in records {
-                if record.key == key {
-                    match &record.value {
-                        Value::Data(s) => return Ok(Some(s.clone())),
-                        Value::Tombstone => return Ok(None), // Key is deleted
-                    }
-                }
-                // Early termination since records are sorted
-                if record.key.as_str() > key {
-                    break;
-                }
+        // Check SSTables with bloom filter optimization
+        let level_manager = self.level_manager.read();
+        let all_sstables = level_manager.get_all_sstables();
+
+        for sstable in all_sstables.iter() {
+            // Quick bloom filter check
+            if !sstable.might_contain(key) {
+                continue;
+            }
+
+            // If bloom filter says it might contain the key, do the actual search
+            if let Some(value_str) = sstable.get(key)? {
+                return Ok(Some(value_str));
             }
         }
 
@@ -347,12 +299,13 @@ impl LSMTree {
 
     pub fn stats(&self) -> LSMStats {
         let memtable = self.memtable.read();
-        let sstables = self.sstables.read();
+        let level_manager = self.level_manager.read();
+        let level_stats = level_manager.stats();
         
         LSMStats {
             memtable_entries: memtable.len(),
-            sstable_count: sstables.len(),
-            total_sstable_entries: sstables.iter().map(|sst| sst.len()).sum(),
+            sstable_count: level_stats.level_stats.values().map(|s| s.file_count).sum(),
+            total_sstable_entries: level_stats.level_stats.values().map(|s| s.total_size).sum(),
             next_flush_at: self.config.memtable_size_limit,
         }
     }
@@ -396,13 +349,13 @@ impl LSMTree {
         println!("Flushing MemTable with {} entries to {}", 
             memtable_len, filepath.display());
         
-        // Create new SSTable
-        let sstable = SSTable::create(&filepath, &memtable_data)?;
+        // Create new SSTable at Level 0
+        let sstable = SSTable::create_with_level(&filepath, &memtable_data, 0)?;
 
-        // Add to our list of SSTables (newest first)
+        // Add to Level Manager
         {
-            let mut sstables = self.sstables.write();
-            sstables.insert(0, sstable);
+            let mut level_manager = self.level_manager.write();
+            level_manager.add_sstable(sstable, 0);
         }
 
         // Clear MemTable
@@ -418,16 +371,11 @@ impl LSMTree {
             println!("WAL truncated after flush");
         }
 
-        // Handle compaction based on configuration
+        // Trigger compaction if needed
         if self.config.background_compaction {
-            // Background compaction is enabled, let the background thread handle it
-            // We could optionally send a signal to the background thread here
             if let Some(ref handle) = self.compaction_handle {
                 handle.send_check_compaction();
             }
-        } else {
-            // Background compaction is disabled - skip all compaction for testing
-            // In a real system, you might want synchronous compaction here instead
         }
 
         Ok(())        
@@ -490,55 +438,6 @@ impl LSMTree {
             .unwrap_or(0)
     }
 
-    // Trigger compaction if needed
-    pub fn maybe_compact(&mut self) -> DbResult<()> {
-        let compactor = Compactor::new(self.config.data_dir.clone());
-
-        let sstable_count = {
-            let sstables = self.sstables.read();
-            sstables.len()
-        };
-
-        if compactor.should_compact(sstable_count) {
-            println!("Compaction triggered: {} SSTables", sstable_count);
-            self.compact()?;
-        }
-        
-        Ok(())
-    }
-
-    // Force compaction of SSTables
-    pub fn compact(&mut self) -> DbResult<()> {
-        let sstable_count = {
-            let sstables = self.sstables.read();
-            sstables.len()
-        };
-
-        if sstable_count < 2 {
-            println!("Skipping compaction: only {} SSTables", sstable_count);
-            return Ok(());
-        }
-    
-        let compactor = Compactor::new(self.config.data_dir.clone());
-
-        let old_sstables = {
-            let sstables = self.sstables.read();
-            sstables.clone()
-        };
-
-        let current_id = self.next_sstable_id.fetch_add(1, Ordering::SeqCst);
-        let compacted_sstable = compactor.compact_sstables(&old_sstables, current_id)?;
-
-        // Replace old SSTables with the new compacted one
-        {
-            let mut sstables = self.sstables.write();
-            *sstables = vec![compacted_sstable];
-        }
-
-        compactor.cleanup_old_sstables(&old_sstables)?;
-        println!("Compaction successful!");
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -614,7 +513,18 @@ mod tests {
         // Force manual compaction to test it works
         println!("Testing manual compaction...");
         let before_manual = lsm.stats();
-        lsm.compact().unwrap();
+        
+        // Manually trigger compaction using the level manager
+        {
+            let mut level_manager = lsm.level_manager.write();
+            let mut compactor = lsm.leveled_compactor.write();
+            
+            // Check if Level 0 needs compaction
+            if level_manager.should_compact(0) {
+                let _ = compactor.compact_level(&mut level_manager, 0);
+            }
+        }
+        
         let after_manual = lsm.stats();
         println!("Manual compaction - before: {}, after: {}", before_manual.sstable_count, after_manual.sstable_count);
 
@@ -997,5 +907,49 @@ mod tests {
         }
         
         println!("WAL with flush test completed successfully!");
+    }
+
+    #[test]
+    fn test_leveled_compaction_integration() {
+        let temp_dir = tempdir().unwrap();
+        let config = LSMConfig {
+            memtable_size_limit: 2,  // Small to trigger flushes
+            data_dir: temp_dir.path().to_path_buf(),
+            background_compaction: false, // Manual compaction for testing
+            background_compaction_interval: Duration::from_secs(1),
+            enable_wal: false,
+        };
+
+        let mut lsm = LSMTree::with_config(config).unwrap();
+
+        println!("=== Testing Leveled Compaction Integration ===");
+        
+        // Insert enough data to trigger multiple levels
+        for i in 1..=10 {
+            lsm.insert(format!("key{:02}", i), format!("value{}", i)).unwrap();
+        }
+
+        // Manually trigger compaction
+        {
+            let mut level_manager = lsm.level_manager.write();
+            let mut compactor = lsm.leveled_compactor.write();
+            
+            // Check if Level 0 needs compaction
+            if level_manager.should_compact(0) {
+                compactor.compact_level(&mut level_manager, 0).unwrap();
+            }
+        }
+
+        // Verify data is still accessible
+        for i in 1..=10 {
+            let key = format!("key{:02}", i);
+            let expected = format!("value{}", i);
+            assert_eq!(lsm.get(&key).unwrap(), Some(expected));
+        }
+
+        let stats = lsm.stats();
+        println!("Final stats: {}", stats);
+        
+        println!("Leveled compaction integration test passed!");
     }
 }

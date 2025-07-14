@@ -45,7 +45,7 @@ impl Compactor {
         let output_filename = format!("sstable_{:06}_compacted.sst", output_id);
         let output_path = self.data_dir.join(output_filename);
 
-        let compacted_sstable = SSTable::create(&output_path, &final_records)?;
+        let compacted_sstable = SSTable::create_with_level(&output_path, &final_records, 0)?;
 
         println!("Compaction complete. Merged SSTable created at: {}", output_path.display());
 

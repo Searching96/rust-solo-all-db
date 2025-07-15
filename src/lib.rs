@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod cli;
+pub mod etl;
 
 use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};

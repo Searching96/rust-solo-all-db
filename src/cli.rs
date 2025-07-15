@@ -1,6 +1,7 @@
 // Command-line interface for the database
 use crate::engine::lsm::{LSMTree, LSMConfig};
 use crate::DbResult;
+use crate::engine::ETLLoader;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -20,7 +21,7 @@ impl DatabaseCLI {
 
     pub fn run(&mut self) -> DbResult<()> {
         println!("Welcome to the RustDB CLI!");
-        println!("Commands: insert <key> <value>, get <key>, delete <key>, compact, autocompact, stats, flush, quit");
+        println!("Commands: insert <key> <value>, get <key>, delete <key>, load <csv_file> [key_col] [value_col], compact, autocompact, stats, flush, quit");
         println!();
 
         loop {
@@ -120,6 +121,23 @@ impl DatabaseCLI {
                 let stats = self.db.stats();
                 println!("After auto-compaction: {}", stats);
             }
+
+            "load" => {
+                if parts.len() < 2 {
+                    println!("Usage: load <csv_file> [key_column] [value_column]");
+                    return Ok(false);
+                }
+
+                let file_path = parts[1];
+                let key_column = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let value_column = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+                
+                let loader = ETLLoader::new();
+                match loader.load_csv(file_path, &mut self.db, key_column, value_column) {
+                    Ok(count) => println!("Successfully loaded {} records from {}", count, file_path),
+                    Err(e) => println!("Error loading CSV: {}", e),
+                }
+            }
             
             "help" => {
                 self.print_help();
@@ -139,16 +157,16 @@ impl DatabaseCLI {
 
     fn print_help(&self) {
         println!("Available commands:");
-        println!("  insert <key> <value>  - Insert a key-value pair");
-        println!("  get <key>            - Get value by key");
-        println!("  delete <key>         - Delete a key");
-        println!("  load <csv_file>      - Load data from CSV file (key,value format)");
-        println!("  compact              - Force compaction of all levels");
-        println!("  autocompact          - Check and compact levels if needed");
-        println!("  stats                - Show database statistics");
-        println!("  flush                - Force flush to disk");
-        println!("  help                 - Show this help");
-        println!("  quit                 - Exit the CLI");
+        println!("  insert <key> <value>                    - Insert a key-value pair");
+        println!("  get <key>                               - Get value by key");
+        println!("  delete <key>                            - Delete a key");
+        println!("  load <csv_file> [key_col] [value_col]   - Load data from CSV file with specified columns (default: 0,1)");
+        println!("  compact                                 - Force compaction of all levels");
+        println!("  autocompact                             - Check and compact levels if needed");
+        println!("  stats                                   - Show database statistics");
+        println!("  flush                                   - Force flush to disk");
+        println!("  help                                    - Show this help");
+        println!("  quit                                    - Exit the CLI");
     }
 }
 

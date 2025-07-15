@@ -1,0 +1,4 @@
+load test_data.csv
+stats
+get Alice
+quit

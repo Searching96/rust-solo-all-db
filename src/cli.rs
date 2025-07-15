@@ -125,12 +125,36 @@ impl DatabaseCLI {
             "load" => {
                 if parts.len() < 2 {
                     println!("Usage: load <csv_file> [key_column] [value_column]");
+                    println!("       load <csv_file> --no-headers [key_column] [value_column]");
                     return Ok(false);
                 }
 
                 let file_path = parts[1];
-                let key_column = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let value_column = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+                let mut key_column = 0;
+                let mut value_column = 1;
+                let mut has_headers = true;
+                let mut i = 2;
+
+                // Parse arguments
+                while i < parts.len() {
+                    match parts[i] {
+                        "--no-headers" => {
+                            has_headers = false;
+                            i += 1;
+                        }
+                        arg => {
+                            if key_column == 0 {
+                                key_column = arg.parse().unwrap_or(0);
+                            } else if value_column == 1 {
+                                value_column = arg.parse().unwrap_or(1);
+                            }
+                            i += 1;
+                        }
+                    }
+                }
+                
+                println!("Loading CSV: {} (key_col={}, value_col={}, headers={})", 
+                    file_path, key_column, value_column, has_headers);
                 
                 let loader = ETLLoader::new();
                 match loader.load_csv(file_path, &mut self.db, key_column, value_column) {

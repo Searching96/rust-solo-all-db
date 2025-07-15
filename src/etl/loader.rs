@@ -35,14 +35,31 @@ impl ETLLoader {
         key_column: usize,
         value_column: usize,
     ) -> DbResult<usize> {
+        self.load_csv_with_options(file_path, lsm_tree, key_column, value_column, true)
+    }
+
+    pub fn load_csv_with_options<P: AsRef<Path>>(
+        &self,
+        file_path: P,
+        lsm_tree: &mut LSMTree,
+        key_column: usize,
+        value_column: usize,
+        has_headers: bool,
+    ) -> DbResult<usize> {
         let file = File::open(file_path).map_err(|e| {
             DbError::InvalidOperation(format!("Failed to open CSV file: {}", e))
         })?;
 
-        let parser = CSVParser::new(key_column, value_column);
+        let parser = CSVParser::new(key_column, value_column)
+            .with_headers(has_headers);
         let records = parser.parse_records(file)?;
 
         println!("Loaded {} records from CSV, starting parallel insertion...", records.len());
+        
+        if records.is_empty() {
+            println!("No records to insert!");
+            return Ok(0);
+        }
 
         // Process records in parallel batches
         let total_inserted = Arc::new(Mutex::new(0));
@@ -128,5 +145,101 @@ mod tests {
         assert_eq!(lsm_tree.get("key1").unwrap(), Some("value1".to_string()));
         assert_eq!(lsm_tree.get("key2").unwrap(), Some("value2".to_string()));
         assert_eq!(lsm_tree.get("key3").unwrap(), Some("value3".to_string()));
+    }
+
+    #[test]
+    fn test_csv_loading_no_headers() {
+        let temp_dir = tempdir().unwrap();
+        
+        // Create test CSV file without headers
+        let csv_path = temp_dir.path().join("test_no_headers.csv");
+        let mut file = File::create(&csv_path).unwrap();
+        writeln!(file, "user1,data1").unwrap();
+        writeln!(file, "user2,data2").unwrap();
+        writeln!(file, "user3,data3").unwrap();
+        
+        // Setup LSM tree
+        let config = LSMConfig {
+            memtable_size_limit: 100,
+            data_dir: temp_dir.path().join("db"),
+            background_compaction: false,
+            background_compaction_interval: std::time::Duration::from_secs(1),
+            enable_wal: false,
+        };
+        
+        let mut lsm_tree = LSMTree::with_config(config).unwrap();
+        
+        // Load CSV
+        let loader = ETLLoader::new();
+        let count = loader.load_csv_with_options(&csv_path, &mut lsm_tree, 0, 1, false).unwrap();
+        
+        assert_eq!(count, 3);
+        
+        // Verify data
+        assert_eq!(lsm_tree.get("user1").unwrap(), Some("data1".to_string()));
+        assert_eq!(lsm_tree.get("user2").unwrap(), Some("data2".to_string()));
+        assert_eq!(lsm_tree.get("user3").unwrap(), Some("data3".to_string()));
+    }
+
+    #[test]
+    fn test_csv_loading_different_columns() {
+        let temp_dir = tempdir().unwrap();
+        
+        // Create test CSV file with different column order
+        let csv_path = temp_dir.path().join("test_different_cols.csv");
+        let mut file = File::create(&csv_path).unwrap();
+        writeln!(file, "id,name,value,status").unwrap();
+        writeln!(file, "1,Alice,apple,active").unwrap();
+        writeln!(file, "2,Bob,banana,inactive").unwrap();
+        writeln!(file, "3,Charlie,cherry,active").unwrap();
+        
+        // Setup LSM tree
+        let config = LSMConfig {
+            memtable_size_limit: 100,
+            data_dir: temp_dir.path().join("db"),
+            background_compaction: false,
+            background_compaction_interval: std::time::Duration::from_secs(1),
+            enable_wal: false,
+        };
+        
+        let mut lsm_tree = LSMTree::with_config(config).unwrap();
+        
+        // Load CSV using columns 1 (name) and 2 (value)
+        let loader = ETLLoader::new();
+        let count = loader.load_csv(&csv_path, &mut lsm_tree, 1, 2).unwrap();
+        
+        assert_eq!(count, 3);
+        
+        // Verify data
+        assert_eq!(lsm_tree.get("Alice").unwrap(), Some("apple".to_string()));
+        assert_eq!(lsm_tree.get("Bob").unwrap(), Some("banana".to_string()));
+        assert_eq!(lsm_tree.get("Charlie").unwrap(), Some("cherry".to_string()));
+    }
+
+    #[test]
+    fn test_csv_loading_empty_file() {
+        let temp_dir = tempdir().unwrap();
+        
+        // Create empty CSV file
+        let csv_path = temp_dir.path().join("empty.csv");
+        let mut file = File::create(&csv_path).unwrap();
+        writeln!(file, "key,value").unwrap(); // Only headers
+        
+        // Setup LSM tree
+        let config = LSMConfig {
+            memtable_size_limit: 100,
+            data_dir: temp_dir.path().join("db"),
+            background_compaction: false,
+            background_compaction_interval: std::time::Duration::from_secs(1),
+            enable_wal: false,
+        };
+        
+        let mut lsm_tree = LSMTree::with_config(config).unwrap();
+        
+        // Load CSV
+        let loader = ETLLoader::new();
+        let count = loader.load_csv(&csv_path, &mut lsm_tree, 0, 1).unwrap();
+        
+        assert_eq!(count, 0);
     }
 }

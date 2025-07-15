@@ -1,0 +1,38 @@
+# Comprehensive ETL Test Suite
+# This script demonstrates all ETL features
+
+# Test 1: Basic CSV loading with headers
+load test_script/csv/test_data.csv 0 1
+stats
+
+# Test 2: Semicolon delimiter
+load test_script/csv/test_semicolon.csv --delimiter ";" 0 1
+stats
+
+# Test 3: Tab delimiter
+load test_script/csv/tab_delimited.tsv --delimiter "\t" 0 1
+stats
+
+# Test 4: Recovery mode with errors
+load test_script/csv/pipe_with_errors.csv --delimiter "|" --recovery-mode 0 1
+stats
+
+# Test 5: No headers mode
+load test_script/csv/no_headers.csv --no-headers 0 1
+stats
+
+# Test 6: Products database with different columns
+load test_script/csv/products.csv 0 1
+stats
+
+# Query some data
+get Alice
+get 1
+get Diana
+
+# Test database operations
+flush
+compact
+stats
+
+quit

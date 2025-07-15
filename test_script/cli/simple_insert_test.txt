@@ -1,0 +1,4 @@
+insert test_key test_value
+get test_key
+stats
+quit

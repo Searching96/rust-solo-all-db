@@ -1,0 +1,7 @@
+# Tab Delimiter Test
+load test_script/csv/tab_delimited.tsv --delimiter "\t" 0 1
+get Alice
+get Bob
+get Diana
+stats
+quit

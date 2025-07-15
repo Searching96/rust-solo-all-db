@@ -1,0 +1,3 @@
+load test_semicolon.csv --delimiter ";" 0 1
+get Alice
+quit

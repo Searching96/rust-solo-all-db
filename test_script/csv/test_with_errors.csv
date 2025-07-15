@@ -1,0 +1,7 @@
+name|age|city|active
+Alice|25|New York|true
+Bob|30|London|false
+Charlie|35|Paris|true
+Diana|28|Berlin|true
+malformed line without proper structure
+Eve|32|Tokyo|false

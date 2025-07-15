@@ -1,0 +1,7 @@
+# Semicolon Delimiter Test
+load test_script/csv/test_semicolon.csv --delimiter ";" 0 1
+get Alice
+get Bob
+get Charlie
+stats
+quit

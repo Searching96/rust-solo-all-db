@@ -1,0 +1,11 @@
+product_id,product_name,price,category,in_stock
+1,Laptop Computer,999.99,Electronics,true
+2,Office Chair,249.50,Furniture,true
+3,Coffee Maker,79.99,Kitchen,false
+4,Smartphone,699.99,Electronics,true
+5,Desk Lamp,34.99,Furniture,true
+6,Wireless Mouse,25.99,Electronics,true
+7,Notebook Set,12.99,Office,true
+8,Water Bottle,18.99,Kitchen,false
+9,Monitor Stand,89.99,Electronics,true
+10,Keyboard,119.99,Electronics,true

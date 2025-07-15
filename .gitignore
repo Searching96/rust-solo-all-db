@@ -1,2 +1,3 @@
 /target
-/cli_data
+/data/runtime/*.sst
+/data/runtime/*.log

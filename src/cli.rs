@@ -13,7 +13,7 @@ impl DatabaseCLI {
     pub fn new() -> DbResult<Self> {
         let mut config = LSMConfig::default();
         config.memtable_size_limit = 100; // Smaller limit for CLI demo
-        config.data_dir = PathBuf::from("cli_data");
+        config.data_dir = PathBuf::from("data/runtime");
 
         let db = LSMTree::with_config(config)?;
         Ok(Self { db })
@@ -126,6 +126,8 @@ impl DatabaseCLI {
                 if parts.len() < 2 {
                     println!("Usage: load <csv_file> [key_column] [value_column]");
                     println!("       load <csv_file> --no-headers [key_column] [value_column]");
+                    println!("       load <csv_file> --delimiter <char> [key_column] [value_column]");
+                    println!("       load <csv_file> --recovery-mode [options]");
                     return Ok(false);
                 }
 
@@ -133,6 +135,8 @@ impl DatabaseCLI {
                 let mut key_column = 0;
                 let mut value_column = 1;
                 let mut has_headers = true;
+                let mut delimiter = ',';
+                let mut recovery_mode = false;
                 let mut i = 2;
 
                 // Parse arguments
@@ -140,6 +144,19 @@ impl DatabaseCLI {
                     match parts[i] {
                         "--no-headers" => {
                             has_headers = false;
+                            i += 1;
+                        }
+                        "--delimiter" => {
+                            if i + 1 < parts.len() {
+                                delimiter = parts[i + 1].chars().next().unwrap_or(',');
+                                i += 2;
+                            } else {
+                                println!("Error: --delimiter requires a character argument");
+                                return Ok(false);
+                            }
+                        }
+                        "--recovery-mode" => {
+                            recovery_mode = true;
                             i += 1;
                         }
                         arg => {
@@ -153,13 +170,34 @@ impl DatabaseCLI {
                     }
                 }
                 
-                println!("Loading CSV: {} (key_col={}, value_col={}, headers={})", 
-                    file_path, key_column, value_column, has_headers);
+                println!("Loading CSV: {} (key_col={}, value_col={}, headers={}, delimiter='{}', recovery={})", 
+                    file_path, key_column, value_column, has_headers, delimiter, recovery_mode);
                 
-                let loader = ETLLoader::new();
-                match loader.load_csv(file_path, &mut self.db, key_column, value_column) {
-                    Ok(count) => println!("Successfully loaded {} records from {}", count, file_path),
-                    Err(e) => println!("Error loading CSV: {}", e),
+                let loader = ETLLoader::new().with_recovery_mode(recovery_mode);
+                
+                if recovery_mode {
+                    match loader.load_csv_with_recovery(file_path, &mut self.db, key_column, value_column, has_headers) {
+                        Ok(result) => {
+                            println!("Successfully loaded {} out of {} records ({:.1}% success rate)", 
+                                result.successful_inserts, result.total_rows, result.success_rate() * 100.0);
+                            
+                            if !result.errors.is_empty() {
+                                println!("Errors encountered:");
+                                for error in result.errors.iter().take(5) { // Show first 5 errors
+                                    println!("  Row {}: {}", error.row_number, error.error);
+                                }
+                                if result.errors.len() > 5 {
+                                    println!("  ... and {} more errors", result.errors.len() - 5);
+                                }
+                            }
+                        }
+                        Err(e) => println!("Error loading CSV: {}", e),
+                    }
+                } else {
+                    match loader.load_csv(file_path, &mut self.db, key_column, value_column) {
+                        Ok(count) => println!("Successfully loaded {} records from {}", count, file_path),
+                        Err(e) => println!("Error loading CSV: {}", e),
+                    }
                 }
             }
             

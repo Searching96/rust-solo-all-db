@@ -1,0 +1,6 @@
+load test_semicolon.csv --delimiter ";" 0 1
+get Alice
+stats
+load test_with_errors.csv --delimiter "|" --recovery-mode 0 1  
+stats
+quit

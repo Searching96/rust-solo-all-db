@@ -1,0 +1,7 @@
+# No Headers Test
+load test_script/csv/no_headers.csv --no-headers 0 1
+get Alice
+get Bob
+get Charlie
+stats
+quit

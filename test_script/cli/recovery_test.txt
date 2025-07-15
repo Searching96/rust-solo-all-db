@@ -1,0 +1,8 @@
+# Recovery Mode Test
+load test_script/csv/pipe_with_errors.csv --delimiter "|" --recovery-mode 0 1
+get Alice
+get Bob
+get Eve
+get Frank
+stats
+quit

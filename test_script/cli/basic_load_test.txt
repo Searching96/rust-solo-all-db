@@ -1,0 +1,7 @@
+# Basic CSV Loading Test
+load test_script/csv/test_data.csv 0 1
+get Alice
+get Bob
+get Charlie
+stats
+quit

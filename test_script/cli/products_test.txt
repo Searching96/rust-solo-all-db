@@ -1,0 +1,11 @@
+# Products Database Test
+load test_script/csv/products.csv 0 1
+get 1
+get 5
+get 10
+stats
+delete 3
+get 3
+compact
+stats
+quit

@@ -323,6 +323,40 @@ impl LSMTree {
         Ok(())
     }
 
+    // Force compaction of all levels that need it
+    pub fn compact(&mut self) -> DbResult<()> {
+        let mut level_manager = self.level_manager.write();
+        let mut leveled_compactor = self.leveled_compactor.write();
+        
+        // Check all levels and compact those that need it
+        for level in 0..=level_manager.get_max_level() {
+            if level_manager.should_compact(level) {
+                println!("Compacting level {}", level);
+                leveled_compactor.compact_level(&mut level_manager, level)?;
+            }
+        }
+        
+        println!("Manual compaction completed");
+        Ok(())
+    }
+
+    // Check if compaction is needed and trigger it if so
+    pub fn maybe_compact(&mut self) -> DbResult<()> {
+        let level_manager = self.level_manager.read();
+        
+        // Check if any level needs compaction
+        for level in 0..=level_manager.get_max_level() {
+            if level_manager.should_compact(level) {
+                drop(level_manager); // Drop the read lock before calling compact
+                println!("Auto-compaction triggered for level {}", level);
+                return self.compact();
+            }
+        }
+        
+        println!("No compaction needed");
+        Ok(())
+    }
+
     // Internal: Flush current MemTable to a new SSTable
     fn flush_memtable(&mut self) -> DbResult<()> {
         let is_empty = {

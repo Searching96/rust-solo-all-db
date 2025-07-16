@@ -1,5 +1,6 @@
 // Command-line interface for the database
 use crate::engine::lsm::{LSMTree, LSMConfig};
+use crate::query::{QueryExecutor, SQLParser};
 use crate::DbResult;
 use crate::engine::ETLLoader;
 use std::io::{self, Write};
@@ -198,6 +199,27 @@ impl DatabaseCLI {
                         Ok(count) => println!("Successfully loaded {} records from {}", count, file_path),
                         Err(e) => println!("Error loading CSV: {}", e),
                     }
+                }
+            }
+
+            "query" => {
+                if parts.len() < 2 {
+                    println!("Usage: query <SQL>");
+                    return Ok(false);
+                }
+                
+                let sql = parts[1..].join(" ");
+                
+                let mut parser = SQLParser::new(&sql);
+                match parser.parse() {
+                    Ok(statement) => {
+                        let mut executor = QueryExecutor::new(&mut self.db);
+                        match executor.execute(statement) {
+                            Ok(result) => println!("{}", result.format()),
+                            Err(e) => println!("Query execution error: {}", e),
+                        }
+                    }
+                    Err(e) => println!("SQL parsing error: {}", e),
                 }
             }
             

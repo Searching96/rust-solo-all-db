@@ -146,7 +146,7 @@ impl ETLLoader {
             DbError::InvalidOperation(format!("Failed to open CSV file: {}", e))
         })?;
 
-        let parser = CSVParser::new(key_column, value_column)
+        let _parser = CSVParser::new(key_column, value_column)
             .with_headers(has_headers);
         
         // Use CSV reader directly for error recovery

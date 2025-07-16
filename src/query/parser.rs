@@ -13,15 +13,15 @@ impl SQLParser {
     }
 
     pub fn parse(&mut self) -> DbResult<Statement> {
-        if self.token.is_empty() {
+        if self.tokens.is_empty() {
             return Err(DbError::InvalidQuery("Empty SQL statement".to_string()));
         }
 
-        match self.token[0].to_uppercase().as_str() {
+        match self.tokens[0].to_uppercase().as_str() {
             "SELECT" => self.parse_select(),
             "INSERT" => self.parse_insert(),
             "DELETE" => self.parse_delete(),
-            _ => Err(DbError::InvalidQuery(format!("Unsupported statement: {}", self.token[0]))),
+            _ => Err(DbError::InvalidQuery(format!("Unsupported statement: {}", self.tokens[0]))),
         }
     }
 
@@ -44,7 +44,7 @@ impl SQLParser {
 
         let limit = if self.peek().map(|s| s.to_uppercase()) == Some("LIMIT".to_string()) {
             self.consume("LIMIT")?;
-            Some(self.consume_number()?)
+            Some(self.consume_number()? as usize)
         } else {
             None
         };
@@ -111,7 +111,7 @@ impl SQLParser {
         Ok(columns)
     }
 
-    fn parse_value_list(&mut self) -> DbResult<Vec<Value>> {
+    fn parse_values(&mut self) -> DbResult<Vec<Value>> {
         let mut values = Vec::new();
         values.push(self.parse_value()?);
 
@@ -218,7 +218,7 @@ impl SQLParser {
         }
     }
 
-    fn consume_number(&mut self) -> DeResult<f64> {
+    fn consume_number(&mut self) -> DbResult<f64> {
         if let Some(token) = self.peek() {
             if let Ok(number) = token.parse::<f64>() {
                 self.advance();

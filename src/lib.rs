@@ -1,6 +1,7 @@
 pub mod engine;
 pub mod cli;
 pub mod etl;
+pub mod query;
 
 use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
@@ -15,6 +16,7 @@ pub struct MemTable {
 pub enum DbError {
     KeyNotFound(String),
     InvalidOperation(String),
+    InvalidQuery(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +58,7 @@ impl std::fmt::Display for DbError {
         match self {
             DbError::KeyNotFound(key) => write!(f, "Key not found: {}", key),
             DbError::InvalidOperation(msg) => write!(f, "Invalid operation: {}", msg),
+            DbError::InvalidQuery(msg) => write!(f, "Invalid query: {}", msg),
         }
     }
 }

@@ -70,13 +70,13 @@ impl fmt::Display for Statement {
         match self {
             Statement::Select(select) => {
                 write!(f, "SELECT {} FROM {}",
-                    .select.columns.join(", "),
+                    select.columns.join(", "),
                     select.table
                 )?;
                 if let Some(where_clause) = &select.where_clause {
                     write!(f, " WHERE {}", where_clause.condition)?;
                 }
-                if let Some(limt) = select.limit {
+                if let Some(limit) = select.limit {
                     write!(f, " LIMIT {}", limit)?;
                 }
                 Ok(())

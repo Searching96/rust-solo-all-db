@@ -2,11 +2,9 @@ pub mod engine;
 pub mod cli;
 pub mod etl;
 pub mod query;
-pub mod macros;
 
 use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
-use macros::*;
 
 // A simple in-memory key-value store using a BTreeMa
 #[derive(Debug, Default)]

@@ -256,8 +256,11 @@ dependencies = [
  "csv",
  "fnv",
  "parking_lot",
+ "proc-macro2",
+ "quote",
  "rayon",
  "serde",
+ "syn",
  "tempfile",
 ]
 

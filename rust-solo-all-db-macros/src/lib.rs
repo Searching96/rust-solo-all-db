@@ -59,7 +59,7 @@ pub fn derive_query_builder(input: TokenStream) -> TokenStream {
 
 /// Simple table definition macro
 #[proc_macro]
-pub fn table(input: TokenStream) -> TokenStream {
+pub fn table(_input: TokenStream) -> TokenStream {
     // For now, just generate a basic struct
     // In a real implementation, this would parse the table definition syntax
     quote! {
@@ -72,7 +72,7 @@ pub fn table(input: TokenStream) -> TokenStream {
 
 /// Simple migration macro
 #[proc_macro]
-pub fn migration(input: TokenStream) -> TokenStream {
+pub fn migration(_input: TokenStream) -> TokenStream {
     // For now, just generate a basic migration struct
     quote! {
         pub struct GeneratedMigration;
@@ -93,7 +93,7 @@ pub fn migration(input: TokenStream) -> TokenStream {
 
 /// Simple database configuration macro
 #[proc_macro]
-pub fn database(input: TokenStream) -> TokenStream {
+pub fn database(_input: TokenStream) -> TokenStream {
     quote! {
         {
             let config = rust_solo_all_db::engine::LSMConfig {
@@ -110,7 +110,7 @@ pub fn database(input: TokenStream) -> TokenStream {
 
 /// Simple query macro
 #[proc_macro]
-pub fn query(input: TokenStream) -> TokenStream {
+pub fn query(_input: TokenStream) -> TokenStream {
     quote! {
         {
             // Simple query placeholder - in real implementation would parse SQL

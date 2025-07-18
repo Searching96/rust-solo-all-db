@@ -2,9 +2,16 @@ pub mod engine;
 pub mod cli;
 pub mod etl;
 pub mod query;
+pub mod config;
+pub mod args;
+pub mod metrics;
 
 use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
+
+pub use config::DatabaseConfig;
+pub use args::{Cli, Commands};
+pub use metrics::PerformanceMetrics;
 
 // A simple in-memory key-value store using a BTreeMa
 #[derive(Debug, Default)]

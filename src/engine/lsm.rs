@@ -357,6 +357,15 @@ impl LSMTree {
         Ok(())
     }
 
+    // Helper methods for CLI functionality
+    pub fn get_data_dir(&self) -> &std::path::PathBuf {
+        &self.config.data_dir
+    }
+
+    pub fn memtable_size(&self) -> usize {
+        self.memtable.read().len()
+    }
+
     // Internal: Flush current MemTable to a new SSTable
     fn flush_memtable(&mut self) -> DbResult<()> {
         let is_empty = {

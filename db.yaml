@@ -1,0 +1,19 @@
+storage:
+  data_dir: data
+  memtable_size_limit: 1000
+  enable_wal: true
+  background_compaction: false
+  compaction_interval_secs: 60
+etl:
+  batch_size: 1000
+  parallel_threads: 4
+  delimiter: ','
+  hash_headers: true
+query:
+  enable_query_cache: true
+  max_result_size: 10000
+  query_timeout_secs: 30
+logging:
+  level: info
+  enable_performance_metrics: false
+  log_file: null

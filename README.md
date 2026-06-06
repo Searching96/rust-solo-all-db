@@ -1,8 +1,8 @@
-# 🚀 Rust Solo All DB - Advanced LSM-Tree Database
+# Rust Solo All DB - Advanced LSM-Tree Database
 
 A high-performance, production-ready database implementation in Rust featuring LSM-Tree storage, parallel ETL processing, and comprehensive testing.
 
-## 🎯 Project Overview
+## Project Overview
 
 This project demonstrates advanced Rust programming skills through a complete database system implementation:
 
@@ -12,7 +12,7 @@ This project demonstrates advanced Rust programming skills through a complete da
 - **🛠️ CLI Interface**: Interactive command-line interface with 40+ tests
 - **🧪 Comprehensive Testing**: Unit tests, integration tests, and CLI test scripts
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 rust-solo-all-db/
@@ -39,7 +39,7 @@ rust-solo-all-db/
 └── README.md           # This file
 ```
 
-## ⚡ Key Features
+## Key Features
 
 ### 🏗️ **Advanced Storage Engine**
 - **LSM-Tree Architecture**: Optimized for write-heavy workloads
@@ -99,7 +99,7 @@ cargo test etl
 cargo run --bin rustdb < test_data/cli_scripts/comprehensive_test.txt
 ```
 
-## 🧪 Test Suite
+## Test Suite
 
 ### **Unit Tests** (40+ tests)
 - Core LSM-Tree operations
@@ -122,7 +122,7 @@ Located in `test_data/cli_scripts/`:
 - `semicolon_test.txt` - Custom delimiter support
 - `comprehensive_test.txt` - Full feature test
 
-## 💡 ETL Features Demonstration
+## ETL Features Demonstration
 
 ### Custom Delimiters
 ```bash
@@ -168,7 +168,7 @@ tempfile = "3.8"      # Temporary files for testing
 - **Parallel Processing**: Multi-threaded ETL with rayon
 - **Crash Recovery**: WAL ensures data durability
 
-## 🎯 Portfolio Highlights
+## Portfolio Highlights
 
 This project demonstrates:
 
@@ -191,7 +191,7 @@ This project demonstrates:
 - ✅ **Configuration**: Flexible parameter tuning
 - ✅ **Documentation**: Comprehensive README and code comments
 
-## 🚀 Next Steps
+## Next Steps
 
 Potential enhancements:
 - **Query Engine**: SQL parser and execution engine
@@ -200,11 +200,11 @@ Potential enhancements:
 - **Web Interface**: REST API and web dashboard
 - **Metrics**: Prometheus/Grafana integration
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 

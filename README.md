@@ -62,7 +62,7 @@ rust-solo-all-db/
 - **Custom Delimiters**: `--delimiter` option
 - **Header Control**: `--no-headers` flag
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 ```bash
